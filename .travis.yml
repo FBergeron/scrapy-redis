@@ -6,7 +6,6 @@ services:
   - redis-server
 
 env:
-  - TOXENV=py27-scrapyrel
   - TOXENV=py34-scrapyrel
   - TOXENV=py35-scrapyrel
 
