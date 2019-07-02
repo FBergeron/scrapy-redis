@@ -5,15 +5,14 @@ from scrapy.dupefilters import BaseDupeFilter
 from scrapy.utils.request import request_fingerprint
 
 from . import defaults
-from .connection import get_redis_from_settings
-
+from .connection import get_ssdb_from_settings
 
 logger = logging.getLogger(__name__)
 
 
-# TODO: Rename class to RedisDupeFilter.
+# TODO: Rename class to SSDBDupeFilter.
 class RFPDupeFilter(BaseDupeFilter):
-    """Redis-based request duplicates filter.
+    """SSDB-based request duplicates filter.
 
     This class can also be used with default Scrapy's scheduler.
 
@@ -26,10 +25,10 @@ class RFPDupeFilter(BaseDupeFilter):
 
         Parameters
         ----------
-        server : redis.StrictRedis
-            The redis server instance.
+        server : ssdb3.Client
+            The sddb server instance.
         key : str
-            Redis key Where to store fingerprints.
+            SSDB key Where to store fingerprints.
         debug : bool, optional
             Whether to log filtered requests.
 
@@ -44,7 +43,7 @@ class RFPDupeFilter(BaseDupeFilter):
         """Returns an instance from given settings.
 
         This uses by default the key ``dupefilter:<timestamp>``. When using the
-        ``scrapy_redis.scheduler.Scheduler`` class, this method is not used as
+        ``scrapy_ssdb.scheduler.Scheduler`` class, this method is not used as
         it needs to pass the spider name in the key.
 
         Parameters
@@ -58,7 +57,7 @@ class RFPDupeFilter(BaseDupeFilter):
 
 
         """
-        server = get_redis_from_settings(settings)
+        server = get_ssdb_from_settings(settings)
         # XXX: This creates one-time key. needed to support to use this
         # class as standalone dupefilter with scrapy's default scheduler
         # if scrapy passes spider on open() method this wouldn't be needed
@@ -97,7 +96,7 @@ class RFPDupeFilter(BaseDupeFilter):
         """
         fp = self.request_fingerprint(request)
         # This returns the number of values added, zero if already exists.
-        added = self.server.sadd(self.key, fp)
+        added = self.server.zset(self.key, fp)
         return added == 0
 
     def request_fingerprint(self, request):
@@ -117,7 +116,7 @@ class RFPDupeFilter(BaseDupeFilter):
     @classmethod
     def from_spider(cls, spider):
         settings = spider.settings
-        server = get_redis_from_settings(settings)
+        server = get_ssdb_from_settings(settings)
         dupefilter_key = settings.get("SCHEDULER_DUPEFILTER_KEY", defaults.SCHEDULER_DUPEFILTER_KEY)
         key = dupefilter_key % {'spider': spider.name}
         debug = settings.getbool('DUPEFILTER_DEBUG')
@@ -135,7 +134,7 @@ class RFPDupeFilter(BaseDupeFilter):
 
     def clear(self):
         """Clears fingerprints data."""
-        self.server.delete(self.key)
+        self.server.zclear(self.key)
 
     def log(self, request, spider):
         """Logs given request.

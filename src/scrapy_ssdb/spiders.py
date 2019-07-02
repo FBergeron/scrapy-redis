@@ -6,20 +6,20 @@ from . import connection, defaults
 from .utils import bytes_to_str
 
 
-class RedisMixin(object):
+class SsdbMixin(object):
     """Mixin class to implement reading urls from a redis queue."""
-    redis_key = None
-    redis_batch_size = None
-    redis_encoding = None
+    ssdb_key = None
+    ssdb_batch_size = None
+    ssdb_encoding = None
 
-    # Redis client placeholder.
+    # Ssdb client placeholder.
     server = None
 
     def start_requests(self):
         """Returns a batch of start requests from redis."""
         return self.next_requests()
 
-    def setup_redis(self, crawler=None):
+    def setup_ssdb(self, crawler=None):
         """Setup redis connection and idle signal.
 
         This should be called after the spider has set its crawler object.
@@ -38,33 +38,33 @@ class RedisMixin(object):
 
         settings = crawler.settings
 
-        if self.redis_key is None:
-            self.redis_key = settings.get(
-                'REDIS_START_URLS_KEY', defaults.START_URLS_KEY,
+        if self.ssdb_key is None:
+            self.ssdb_key = settings.get(
+                'SSDB_START_URLS_KEY', defaults.START_URLS_KEY,
             )
 
-        self.redis_key = self.redis_key % {'name': self.name}
+        self.ssdb_key = self.ssdb_key % {'name': self.name}
 
-        if not self.redis_key.strip():
-            raise ValueError("redis_key must not be empty")
+        if not self.ssdb_key.strip():
+            raise ValueError("ssdb_key must not be empty")
 
-        if self.redis_batch_size is None:
+        if self.ssdb_batch_size is None:
             # TODO: Deprecate this setting (REDIS_START_URLS_BATCH_SIZE).
-            self.redis_batch_size = settings.getint(
-                'REDIS_START_URLS_BATCH_SIZE',
+            self.ssdb_batch_size = settings.getint(
+                'SSDB_START_URLS_BATCH_SIZE',
                 settings.getint('CONCURRENT_REQUESTS'),
             )
 
         try:
-            self.redis_batch_size = int(self.redis_batch_size)
+            self.redis_batch_size = int(self.ssdb_batch_size)
         except (TypeError, ValueError):
-            raise ValueError("redis_batch_size must be an integer")
+            raise ValueError("ssdb_batch_size must be an integer")
 
-        if self.redis_encoding is None:
-            self.redis_encoding = settings.get('REDIS_ENCODING', defaults.REDIS_ENCODING)
+        if self.ssdb_encoding is None:
+            self.ssdb_encoding = settings.get('ssdb_ENCODING', defaults.SSDB_ENCODING)
 
-        self.logger.info("Reading start URLs from redis key '%(redis_key)s' "
-                         "(batch size: %(redis_batch_size)s, encoding: %(redis_encoding)s",
+        self.logger.info("Reading start URLs from ssdb key '%(redis_key)s' "
+                         "(batch size: %(redis_batch_size)s, encoding: %(ssdb_encoding)s",
                          self.__dict__)
 
         self.server = connection.from_settings(crawler.settings)
@@ -74,17 +74,16 @@ class RedisMixin(object):
 
     def next_requests(self):
         """Returns a request to be scheduled or none."""
-        use_set = self.settings.getbool('REDIS_START_URLS_AS_SET', defaults.START_URLS_AS_SET)
-        fetch_one = self.server.spop if use_set else self.server.lpop
+        fetch_one = self.server.qpop_front
         # XXX: Do we need to use a timeout here?
         found = 0
         # TODO: Use redis pipeline execution.
-        while found < self.redis_batch_size:
-            data = fetch_one(self.redis_key)
+        while found < self.ssdb_batch_size:
+            data = fetch_one(self.ssdb_key)
             if not data:
                 # Queue empty.
                 break
-            req = self.make_request_from_data(data)
+            req = self.make_request_from_data(data[0])
             if req:
                 yield req
                 found += 1
@@ -92,7 +91,7 @@ class RedisMixin(object):
                 self.logger.debug("Request not made from data: %r", data)
 
         if found:
-            self.logger.debug("Read %s requests from '%s'", found, self.redis_key)
+            self.logger.debug("Read %s requests from '%s'", found, self.ssdb_key)
 
     def make_request_from_data(self, data):
         """Returns a Request instance from data coming from Redis.
@@ -106,7 +105,7 @@ class RedisMixin(object):
             Message from redis.
 
         """
-        url = bytes_to_str(data, self.redis_encoding)
+        url = bytes_to_str(data, self.ssdb_encoding)
         return self.make_requests_from_url(url)
 
     def schedule_next_requests(self):
@@ -122,7 +121,7 @@ class RedisMixin(object):
         raise DontCloseSpider
 
 
-class RedisSpider(RedisMixin, Spider):
+class SsdbSpider(SsdbMixin, Spider):
     """Spider that reads urls from redis queue when idle.
 
     Attributes
@@ -150,12 +149,12 @@ class RedisSpider(RedisMixin, Spider):
 
     @classmethod
     def from_crawler(self, crawler, *args, **kwargs):
-        obj = super(RedisSpider, self).from_crawler(crawler, *args, **kwargs)
-        obj.setup_redis(crawler)
+        obj = super(SsdbSpider, self).from_crawler(crawler, *args, **kwargs)
+        obj.setup_ssdb(crawler)
         return obj
 
 
-class RedisCrawlSpider(RedisMixin, CrawlSpider):
+class SsdbCrawlSpider(SsdbMixin, CrawlSpider):
     """Spider that reads urls from redis queue when idle.
 
     Attributes
@@ -182,6 +181,6 @@ class RedisCrawlSpider(RedisMixin, CrawlSpider):
 
     @classmethod
     def from_crawler(self, crawler, *args, **kwargs):
-        obj = super(RedisCrawlSpider, self).from_crawler(crawler, *args, **kwargs)
-        obj.setup_redis(crawler)
+        obj = super(SsdbCrawlSpider, self).from_crawler(crawler, *args, **kwargs)
+        obj.setup_ssdb(crawler)
         return obj

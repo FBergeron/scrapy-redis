@@ -2,21 +2,23 @@ from scrapy.utils.reqser import request_to_dict, request_from_dict
 
 from . import picklecompat
 
+# TODO: The prefix should not be hardcoded.
+TABLE_REQUEST_BODIES = 'blog_crawler:request_bodies'
 
 class Base(object):
     """Per-spider base queue class"""
 
     def __init__(self, server, spider, key, serializer=None):
-        """Initialize per-spider redis queue.
+        """Initialize per-spider ssdb queue.
 
         Parameters
         ----------
-        server : StrictRedis
-            Redis client instance.
+        server : ssdb3.Client
+            SSDB client instance.
         spider : Spider
             Scrapy spider instance.
         key: str
-            Redis key where to put and get messages.
+            SSDB key where to put and get messages.
         serializer : object
             Serializer object with ``loads`` and ``dumps`` methods.
 
@@ -61,7 +63,7 @@ class Base(object):
 
     def clear(self):
         """Clear queue/stack"""
-        self.server.delete(self.key)
+        self.server.qclear(self.key)
 
 
 class FifoQueue(Base):
@@ -69,52 +71,49 @@ class FifoQueue(Base):
 
     def __len__(self):
         """Return the length of the queue"""
-        return self.server.llen(self.key)
+        return self.server.qsize(self.key)
 
     def push(self, request):
         """Push a request"""
-        self.server.lpush(self.key, self._encode_request(request))
+        self.server.qpush_front(self.key, self._encode_request(request))
 
     def pop(self, timeout=0):
         """Pop a request"""
-        if timeout > 0:
-            data = self.server.brpop(self.key, timeout)
-            if isinstance(data, tuple):
-                data = data[1]
-        else:
-            data = self.server.rpop(self.key)
+        data = self.server.qpop_back(self.key)
         if data:
-            return self._decode_request(data)
+            return self._decode_request(data[0])
 
 
 class PriorityQueue(Base):
-    """Per-spider priority queue abstraction using redis' sorted set"""
+    """Per-spider priority queue abstraction using ssdb' sorted set"""
 
     def __len__(self):
         """Return the length of the queue"""
-        return self.server.zcard(self.key)
+        return self.server.zsize(self.key)
 
     def push(self, request):
         """Push a request"""
         data = self._encode_request(request)
         score = -request.priority
-        # We don't use zadd method as the order of arguments change depending on
-        # whether the class is Redis or StrictRedis, and the option of using
-        # kwargs only accepts strings, not bytes.
-        self.server.execute_command('ZADD', self.key, score, data)
+        fingerprint = request_fingerprint(request)        
+
+        self.server.hset(TABLE_REQUEST_BODIES, fingerprint, data)
+        self.server.zset(self.key, fingerprint, score)
 
     def pop(self, timeout=0):
         """
         Pop a request
         timeout not support in this queue class
         """
-        # use atomic range/remove using multi/exec
-        pipe = self.server.pipeline()
-        pipe.multi()
-        pipe.zrange(self.key, 0, 0).zremrangebyrank(self.key, 0, 0)
-        results, count = pipe.execute()
-        if results:
-            return self._decode_request(results[0])
+        items = self.server.zpop_front(self.key, 1)
+        if items is not None and isinstance(items, list) and len(items) > 0:
+            fingerprint = items[0].decode('utf-8')
+            score = int(items[1].decode('utf-8'))
+            if fingerprint is not None:
+                data = self.server.hget(TABLE_REQUEST_BODIES, fingerprint)
+                self.server.hdel(TABLE_REQUEST_BODIES, fingerprint)
+                request = self._decode_request(data)
+                return request
 
 
 class LifoQueue(Base):
@@ -122,23 +121,17 @@ class LifoQueue(Base):
 
     def __len__(self):
         """Return the length of the stack"""
-        return self.server.llen(self.key)
+        return self.server.qsize(self.key)
 
     def push(self, request):
         """Push a request"""
-        self.server.lpush(self.key, self._encode_request(request))
+        self.server.qpush_front(self.key, self._encode_request(request))
 
     def pop(self, timeout=0):
         """Pop a request"""
-        if timeout > 0:
-            data = self.server.blpop(self.key, timeout)
-            if isinstance(data, tuple):
-                data = data[1]
-        else:
-            data = self.server.lpop(self.key)
-
+        data = self.server.qpop_front(self.key)
         if data:
-            return self._decode_request(data)
+            return self._decode_request(data[0])
 
 
 # TODO: Deprecate the use of these names.

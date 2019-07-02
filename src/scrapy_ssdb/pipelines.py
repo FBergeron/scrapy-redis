@@ -8,14 +8,14 @@ from . import connection, defaults
 default_serialize = ScrapyJSONEncoder().encode
 
 
-class RedisPipeline(object):
-    """Pushes serialized item into a redis list/queue
+class SSDBPipeline(object):
+    """Pushes serialized item into a ssdb list/queue
 
     Settings
     --------
-    REDIS_ITEMS_KEY : str
-        Redis key where to store items.
-    REDIS_ITEMS_SERIALIZER : str
+    SSDB_ITEMS_KEY : str
+        SSDB key where to store items.
+    SSDB_ITEMS_SERIALIZER : str
         Object path to serializer function.
 
     """
@@ -27,10 +27,10 @@ class RedisPipeline(object):
 
         Parameters
         ----------
-        server : StrictRedis
-            Redis client instance.
+        server : sddb3.Client
+            SSDB client instance.
         key : str
-            Redis key where to store items.
+            SSDB key where to store items.
         serialize_func : callable
             Items serializer function.
 
@@ -44,11 +44,11 @@ class RedisPipeline(object):
         params = {
             'server': connection.from_settings(settings),
         }
-        if settings.get('REDIS_ITEMS_KEY'):
-            params['key'] = settings['REDIS_ITEMS_KEY']
-        if settings.get('REDIS_ITEMS_SERIALIZER'):
+        if settings.get('SSDB_ITEMS_KEY'):
+            params['key'] = settings['SSDB_ITEMS_KEY']
+        if settings.get('SSDB_ITEMS_SERIALIZER'):
             params['serialize_func'] = load_object(
-                settings['REDIS_ITEMS_SERIALIZER']
+                settings['SSDB_ITEMS_SERIALIZER']
             )
 
         return cls(**params)
@@ -63,11 +63,11 @@ class RedisPipeline(object):
     def _process_item(self, item, spider):
         key = self.item_key(item, spider)
         data = self.serialize(item)
-        self.server.rpush(key, data)
+        self.server.qpush_back(key, data)
         return item
 
     def item_key(self, item, spider):
-        """Returns redis key based on given spider.
+        """Returns ssdb key based on given spider.
 
         Override this function to use a different key depending on the item
         and/or spider.
