@@ -1,5 +1,5 @@
 from scrapy.utils.reqser import request_to_dict, request_from_dict
-
+from scrapy.utils.request import request_fingerprint
 from . import picklecompat
 
 # TODO: The prefix should not be hardcoded.
