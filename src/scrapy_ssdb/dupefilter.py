@@ -9,7 +9,6 @@ from .connection import get_ssdb_from_settings
 
 logger = logging.getLogger(__name__)
 
-
 # TODO: Rename class to SSDBDupeFilter.
 class RFPDupeFilter(BaseDupeFilter):
     """SSDB-based request duplicates filter.
@@ -96,7 +95,7 @@ class RFPDupeFilter(BaseDupeFilter):
         """
         fp = self.request_fingerprint(request)
         # This returns the number of values added, zero if already exists.
-        added = self.server.zset(self.key, fp)
+        added = self.server.zset(self.key, fp, 0)
         return added == 0
 
     def request_fingerprint(self, request):
